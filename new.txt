@@ -1,0 +1,126 @@
+Sub ImportAndSortCSVs()
+    Dim wbMacro As Workbook, wbCSV As Workbook, wbNew As Workbook
+    Dim wsCSV As Worksheet, wsNew As Worksheet
+    Dim fso As Object, folderPath As String, file As Object
+    Dim firstPlatform As String
+    Dim tblRange As Range
+    Dim newSheet As Worksheet
+    Dim lastCol As Long, lastRow As Long
+    Dim newWbCreated As Boolean
+    Dim saveName As String
+    Dim typeCol As Long, yearCol As Long, platCol As Long, matDateCol As Long
+    Dim colIndex As Variant
+    Dim i As Long
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    
+    Set wbMacro = ThisWorkbook
+    folderPath = wbMacro.Path & "\"
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    newWbCreated = False
+    
+    ' Loop through all CSV files
+    For Each file In fso.GetFolder(folderPath).Files
+        If LCase(Right(file.Name, 4)) = ".csv" Then
+            ' Open CSV file
+            Set wbCSV = Workbooks.Open(file.Path)
+            Set wsCSV = wbCSV.Sheets(1)
+            
+            ' Find last used row and col
+            lastRow = wsCSV.Cells(wsCSV.Rows.Count, 1).End(xlUp).Row
+            lastCol = wsCSV.Cells(1, wsCSV.Columns.Count).End(xlToLeft).Column
+            
+            Set tblRange = wsCSV.Range(wsCSV.Cells(1, 1), wsCSV.Cells(lastRow, lastCol))
+            
+            ' Get column indexes
+            typeCol = Application.Match("Type", tblRange.Rows(1), 0)
+            yearCol = Application.Match("Year Of Maturity", tblRange.Rows(1), 0)
+            platCol = Application.Match("Platform", tblRange.Rows(1), 0)
+            matDateCol = Application.Match("Maturity Date", tblRange.Rows(1), 0)
+            
+            ' Sort by Type then Year Of Maturity
+            tblRange.Sort Key1:=tblRange.Columns(typeCol), _
+                          Order1:=xlAscending, _
+                          Key2:=tblRange.Columns(yearCol), _
+                          Order2:=xlAscending, Header:=xlYes
+                          
+            ' Get first Platform entry
+            firstPlatform = wsCSV.Cells(2, platCol).Value
+            
+            ' Create new workbook only once
+            If Not newWbCreated Then
+                Set wbNew = Workbooks.Add
+                newWbCreated = True
+            End If
+            
+            ' Add new sheet named as Platform
+            On Error Resume Next
+            Set newSheet = wbNew.Sheets.Add
+            newSheet.Name = firstPlatform
+            On Error GoTo 0
+            
+            ' Copy table to new sheet
+            tblRange.Copy
+            newSheet.Range("A1").PasteSpecial xlPasteValues
+            newSheet.Range("A1").PasteSpecial xlPasteFormats
+            
+            ' 1. Make headers bold
+            newSheet.Rows(1).Font.Bold = True
+            
+            ' 2. Insert blank row between each Type group
+            Dim typeColNew As Long
+            lastRow = newSheet.Cells(newSheet.Rows.Count, 1).End(xlUp).Row
+            typeColNew = Application.Match("Type", newSheet.Rows(1), 0)
+            
+            For i = lastRow To 3 Step -1
+                If newSheet.Cells(i, typeColNew).Value <> newSheet.Cells(i - 1, typeColNew).Value Then
+                    newSheet.Rows(i).Insert Shift:=xlDown
+                End If
+            Next i
+            
+            ' 3. Add borders around the entire table
+            lastRow = newSheet.Cells(newSheet.Rows.Count, 1).End(xlUp).Row
+            lastCol = newSheet.Cells(1, newSheet.Columns.Count).End(xlToLeft).Column
+            With newSheet.Range(newSheet.Cells(1, 1), newSheet.Cells(lastRow, lastCol)).Borders
+                .LineStyle = xlContinuous
+                .Weight = xlThin
+            End With
+            
+            ' 4. Right align "Maturity Date" column
+            On Error Resume Next
+            matDateCol = Application.Match("Maturity Date", newSheet.Rows(1), 0)
+            If Not IsError(matDateCol) Then
+                newSheet.Columns(matDateCol).HorizontalAlignment = xlRight
+            End If
+            On Error GoTo 0
+            
+            ' Delete unwanted columns (delete highest index first to avoid shifting)
+            For Each colIndex In Array(platCol, yearCol, typeCol)
+                On Error Resume Next
+                newSheet.Columns(colIndex).Delete
+                On Error GoTo 0
+            Next colIndex
+            
+            ' Close CSV without saving
+            wbCSV.Close SaveChanges:=False
+        End If
+    Next file
+    
+    Application.CutCopyMode = False
+    
+    ' Save the combined workbook if created
+    If newWbCreated Then
+        saveName = folderPath & "combined_" & Format(Now, "yyyymmdd_HHMMSS") & ".xlsx"
+        wbNew.SaveAs Filename:=saveName, FileFormat:=51
+        MsgBox "All CSV files imported and saved as:" & vbCrLf & saveName, vbInformation
+    Else
+        MsgBox "No CSV files found in this folder.", vbExclamation
+    End If
+    
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+End Sub
+
+
